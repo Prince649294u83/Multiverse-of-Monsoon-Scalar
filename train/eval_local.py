@@ -19,6 +19,7 @@ import torch
 from monsoon_r1 import contract as C, scoring as S
 from model.architecture import ClimateDigitalTwin, IN_CHANNELS
 from model.hybrid_advection import HybridAdvectionTwin
+from model.gated_transport import GatedTransportTwin
 
 ROOT = Path(__file__).resolve().parent.parent
 PROC_DIR = ROOT / "data" / "processed"
@@ -67,7 +68,13 @@ def _load_twin(path: Path) -> ClimateDigitalTwin:
         clim_internal=ckpt["clim_internal"],
         static_coords=ckpt["static_coords"],
     )
-    m = HybridAdvectionTwin(**model_args) if ckpt.get("model_kind") == "hybrid_advection" else ClimateDigitalTwin(arch=ckpt["arch"], **model_args)
+    kind = ckpt.get("model_kind", "baseline")
+    if kind == "hybrid_advection":
+        m = HybridAdvectionTwin(**model_args)
+    elif kind == "gated_transport":
+        m = GatedTransportTwin(**model_args)
+    else:
+        m = ClimateDigitalTwin(arch=ckpt["arch"], **model_args)
     loaded = m.load_state_dict(ckpt["state_dict"], strict=False)
     allowed = {"shock_operator.kernel"}
     if set(loaded.missing_keys) - allowed or set(loaded.unexpected_keys) - allowed:

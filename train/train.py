@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from model.architecture import ClimateDigitalTwin, IN_CHANNELS
 from model.hybrid_advection import HybridAdvectionTwin
+from model.gated_transport import GatedTransportTwin
 from model.features import build_coord_channels
 from train.losses import MonsoonRolloutLoss
 
@@ -118,7 +119,7 @@ def save_checkpoint(model: torch.nn.Module, path: Path) -> None:
         "format_version": 3,
         "in_channels": IN_CHANNELS,
         "arch": model.arch_name,
-        "model_kind": "hybrid_advection" if model.arch_name == "hybrid_advection" else "baseline",
+        "model_kind": model.arch_name if model.arch_name in {"hybrid_advection", "gated_transport"} else "baseline",
         "state_dict": {k: v.detach().cpu() for k, v in model.state_dict().items()},
         "internal_mean": model.internal_mean.detach().cpu(),
         "internal_std": model.internal_std.detach().cpu(),
@@ -131,7 +132,8 @@ def save_checkpoint(model: torch.nn.Module, path: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arch", type=str, default="unet", choices=["unet", "resnet", "hybrid_advection"])
+    ap.add_argument("--arch", type=str, default="unet", choices=["unet", "resnet", "hybrid_advection", "gated_transport"])
+    ap.add_argument("--init-checkpoint", type=Path, default=None, help="Baseline checkpoint used only to initialize gated_transport")
     ap.add_argument("--batch-size", type=int, default=64 if torch.cuda.is_available() else 32)
     ap.add_argument("--stage1-epochs", type=int, default=6)
     ap.add_argument("--stage2-epochs", type=int, default=14)
@@ -165,8 +167,21 @@ def main() -> None:
         clim_internal=torch.from_numpy(train_npz["clim_int"]),
         static_coords=torch.from_numpy(static_coords),
     )
-    model = (HybridAdvectionTwin(**model_args) if args.arch == "hybrid_advection"
-             else ClimateDigitalTwin(arch=args.arch, **model_args)).to(device)
+    if args.arch == "hybrid_advection":
+        model = HybridAdvectionTwin(**model_args)
+    elif args.arch == "gated_transport":
+        model = GatedTransportTwin(**model_args)
+        init_path = args.init_checkpoint or (WEIGHTS_DIR / "model.pt")
+        if not init_path.is_file():
+            raise FileNotFoundError(f"Gated transport requires baseline checkpoint: {init_path}")
+        init = torch.load(init_path, map_location="cpu", weights_only=False)
+        if init.get("model_kind", "baseline") != "baseline":
+            raise RuntimeError(f"{init_path} is not a baseline checkpoint")
+        model.initialize_from_baseline(init["state_dict"])
+        print(f"Initialized gated transport candidate from {init_path}")
+    else:
+        model = ClimateDigitalTwin(arch=args.arch, **model_args)
+    model = model.to(device)
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model arch={args.arch}, params={n_params:,}")
