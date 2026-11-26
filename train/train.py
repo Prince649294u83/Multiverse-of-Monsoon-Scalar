@@ -17,6 +17,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 from model.architecture import ClimateDigitalTwin, IN_CHANNELS
+from model.hybrid_advection import HybridAdvectionTwin
 from model.features import build_coord_channels
 from train.losses import MonsoonRolloutLoss
 
@@ -112,11 +113,12 @@ def run_epoch(
     return {k_name: v / max(n_batches, 1) for k_name, v in agg.items()}
 
 
-def save_checkpoint(model: ClimateDigitalTwin, path: Path) -> None:
+def save_checkpoint(model: torch.nn.Module, path: Path) -> None:
     ckpt = {
         "format_version": 3,
         "in_channels": IN_CHANNELS,
         "arch": model.arch_name,
+        "model_kind": "hybrid_advection" if model.arch_name == "hybrid_advection" else "baseline",
         "state_dict": {k: v.detach().cpu() for k, v in model.state_dict().items()},
         "internal_mean": model.internal_mean.detach().cpu(),
         "internal_std": model.internal_std.detach().cpu(),
@@ -129,7 +131,7 @@ def save_checkpoint(model: ClimateDigitalTwin, path: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arch", type=str, default="unet", choices=["unet", "resnet"])
+    ap.add_argument("--arch", type=str, default="unet", choices=["unet", "resnet", "hybrid_advection"])
     ap.add_argument("--batch-size", type=int, default=64 if torch.cuda.is_available() else 32)
     ap.add_argument("--stage1-epochs", type=int, default=6)
     ap.add_argument("--stage2-epochs", type=int, default=14)
@@ -156,14 +158,15 @@ def main() -> None:
 
     static_coords = build_coord_channels(static_raw, meta["oro_mean"], meta["oro_std"])
 
-    model = ClimateDigitalTwin(
-        arch=args.arch,
+    model_args = dict(
         internal_mean=torch.tensor(meta["internal_mean"], dtype=torch.float32),
         internal_std=torch.tensor(meta["internal_std"], dtype=torch.float32),
         anom_std=torch.tensor(meta["anom_std"], dtype=torch.float32),
         clim_internal=torch.from_numpy(train_npz["clim_int"]),
         static_coords=torch.from_numpy(static_coords),
-    ).to(device)
+    )
+    model = (HybridAdvectionTwin(**model_args) if args.arch == "hybrid_advection"
+             else ClimateDigitalTwin(arch=args.arch, **model_args)).to(device)
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model arch={args.arch}, params={n_params:,}")

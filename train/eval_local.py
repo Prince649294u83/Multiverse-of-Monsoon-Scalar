@@ -18,6 +18,7 @@ import torch
 
 from monsoon_r1 import contract as C, scoring as S
 from model.architecture import ClimateDigitalTwin, IN_CHANNELS
+from model.hybrid_advection import HybridAdvectionTwin
 
 ROOT = Path(__file__).resolve().parent.parent
 PROC_DIR = ROOT / "data" / "processed"
@@ -59,14 +60,14 @@ def _load_twin(path: Path) -> ClimateDigitalTwin:
             f"{path} uses {got_channels} input channels, but this source requires {IN_CHANNELS}. "
             "This checkpoint predates the current feature pipeline; retrain it rather than loading it partially."
         )
-    m = ClimateDigitalTwin(
-        arch=ckpt["arch"],
+    model_args = dict(
         internal_mean=ckpt["internal_mean"],
         internal_std=ckpt["internal_std"],
         anom_std=ckpt["anom_std"],
         clim_internal=ckpt["clim_internal"],
         static_coords=ckpt["static_coords"],
     )
+    m = HybridAdvectionTwin(**model_args) if ckpt.get("model_kind") == "hybrid_advection" else ClimateDigitalTwin(arch=ckpt["arch"], **model_args)
     loaded = m.load_state_dict(ckpt["state_dict"], strict=False)
     allowed = {"shock_operator.kernel"}
     if set(loaded.missing_keys) - allowed or set(loaded.unexpected_keys) - allowed:
