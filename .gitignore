@@ -1,0 +1,23 @@
+# Ignore raw dataset and downloaded wheels to comply with anti-cheat & repo scan rules
+data/
+*.nc
+*.nc4
+*.grib*
+*.zarr*
+*.whl
+
+# Ignore team kit clone (kit should not be committed inside submission repo)
+yug-monsoon-kit/
+
+# Python cache & virtual environments
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+*.egg-info/
+dist/
+build/
+.DS_Store
