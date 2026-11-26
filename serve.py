@@ -22,7 +22,7 @@ from model.gated_transport import GatedTransportTwin
 ROOT = Path(__file__).resolve().parent
 WEIGHTS_PATH = ROOT / "weights" / "model.pt"
 ENS2_PATH = ROOT / "weights" / "model_ens2.pt"
-MODEL_NAME = "physics-informed-local-climate-twin-v3"
+MODEL_NAME = "gated-transport-climate-twin-candidate-c"
 
 # Tune CPU thread count for compact [1, C, 32, 36] conv tensors
 torch.set_num_threads(2)
