@@ -48,8 +48,10 @@ class HybridAdvectionTwin(nn.Module):
         yy, xx = torch.meshgrid(
             torch.arange(NLAT, dtype=torch.float32), torch.arange(NLON, dtype=torch.float32), indexing="ij"
         )
-        self.register_buffer("grid_y", yy.view(1, NLAT, NLON))
-        self.register_buffer("grid_x", xx.view(1, NLAT, NLON))
+        # meshgrid may return expanded views.  Materialize them so a checkpoint
+        # can be loaded safely under recent PyTorch overlap checks.
+        self.register_buffer("grid_y", yy.reshape(1, NLAT, NLON).clone())
+        self.register_buffer("grid_x", xx.reshape(1, NLAT, NLON).clone())
         self.register_buffer("internal_mean", internal_mean.view(1, NC, 1, 1).float())
         self.register_buffer("internal_std", internal_std.view(1, NC, 1, 1).float())
         self.register_buffer("anom_std", anom_std.view(1, NC, 1, 1).float())
