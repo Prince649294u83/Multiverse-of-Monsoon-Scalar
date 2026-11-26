@@ -16,6 +16,8 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 
 from model.architecture import ClimateDigitalTwin, IN_CHANNELS
+from model.hybrid_advection import HybridAdvectionTwin
+from model.gated_transport import GatedTransportTwin
 
 ROOT = Path(__file__).resolve().parent
 WEIGHTS_PATH = ROOT / "weights" / "model.pt"
@@ -37,14 +39,20 @@ def _load_one(path: Path) -> ClimateDigitalTwin:
             f"{path} uses {got_channels} input channels, but this server requires {IN_CHANNELS}. "
             "Retrain after updating the source and copy the matching checkpoint into weights/."
         )
-    model = ClimateDigitalTwin(
-        arch=ckpt["arch"],
+    model_args = dict(
         internal_mean=ckpt["internal_mean"],
         internal_std=ckpt["internal_std"],
         anom_std=ckpt["anom_std"],
         clim_internal=ckpt["clim_internal"],
         static_coords=ckpt["static_coords"],
     )
+    kind = ckpt.get("model_kind", "baseline")
+    if kind == "hybrid_advection":
+        model = HybridAdvectionTwin(**model_args)
+    elif kind == "gated_transport":
+        model = GatedTransportTwin(**model_args)
+    else:
+        model = ClimateDigitalTwin(arch=ckpt["arch"], **model_args)
     loaded = model.load_state_dict(ckpt["state_dict"], strict=False)
     allowed = {"shock_operator.kernel"}
     if set(loaded.missing_keys) - allowed or set(loaded.unexpected_keys) - allowed:
