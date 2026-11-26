@@ -1,0 +1,33 @@
+{
+  "model": {
+    "arch": "unet",
+    "in_channels": 42,
+    "base_channels": 48,
+    "bottleneck_channels": 72,
+    "tp_shift": 0.25,
+    "shock_mode": "operator",
+    "shock_step_retention": 0.90
+  },
+  "data": {
+    "train_years": [2005, 2019],
+    "val_years": [2020, 2021],
+    "climatology_days": 365,
+    "climatology_sigma": 7.0,
+    "recency_weighted": true
+  },
+  "training": {
+    "seeds": [42, 101],
+    "batch_size_gpu": 64,
+    "stage1_k1_epochs": 6,
+    "stage2_k4_epochs": 14,
+    "stage3_k8_epochs": 20,
+    "weight_decay": 0.0005,
+    "loss_weights": {
+      "w_csi": 0.14,
+      "w_var": 0.14,
+      "w_grad": 0.12,
+      "w_spec": 0.06,
+      "rain_thresh_mm": 10.0
+    }
+  }
+}
