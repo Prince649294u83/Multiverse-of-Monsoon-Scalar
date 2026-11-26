@@ -48,6 +48,16 @@ In a second terminal (while `serve.py` is running):
 streamlit run dashboard/app.py
 ```
 
+The **Scenario Lab** tab invokes the live server for warm Bay of Bengal,
+Arabian Sea wind-stall, and null-shock cases. It reports response locality,
+outward propagation, output-validity, and null-shock consistency. These are
+live physical-response checks; use the held-out historical benchmark for
+measured forecast skill:
+
+```bash
+python -m train.stress_benchmark --ckpt weights/model.pt
+```
+
 ### 6. Clean Repo Scan Check (Before Final Submission)
 Move raw training `.nc` files (`data/india_climate_train.nc`) and `yug-monsoon-kit/` outside the scanned directory (or scan a clean `git archive` export) so `repo_scan` sees only submission files:
 ```bash

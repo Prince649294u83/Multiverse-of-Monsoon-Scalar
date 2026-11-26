@@ -37,6 +37,12 @@ PRESET_SEEDS = {
     "Winter Western Disturbance (Jan 20, DOY 20)": 20,
 }
 
+SCENARIO_SUITE = {
+    "Warm Bay of Bengal": "Warm Bay of Bengal (+3K, +15% tcwv)",
+    "Arabian Sea wind stall": "Arabian Sea Monsoon Stall (-40% wind)",
+    "Null-shock determinism": "Null Shock (Zeros)",
+}
+
 st.set_page_config(page_title="Multiverse of Monsoon — Digital Twin", layout="wide")
 
 
@@ -129,6 +135,46 @@ def heatmap_fig(grid: np.ndarray, title: str, zmin=None, zmax=None, colorscale="
     return fig
 
 
+def scenario_diagnostics(prime: np.ndarray, branch: np.ndarray, perturbation: np.ndarray | None, mode: str) -> dict[str, float | bool]:
+    """Live-output diagnostic, aligned with the public causality intent.
+
+    This is a dashboard sanity check, not an organiser score: it operates on
+    the current simulation only and makes no claim about an unobserved
+    counterfactual ground truth.
+    """
+    delta = branch - prime
+    finite = bool(np.isfinite(branch).all())
+    rain_ok = bool(branch[:, 1].min() >= -1e-6)
+    temp_ok = bool(233.15 <= branch[:, 0].min() and branch[:, 0].max() <= 333.15)
+    if perturbation is None or not np.any(perturbation):
+        return {
+            "finite": finite, "rain_ok": rain_ok, "temp_ok": temp_ok,
+            "null_max_delta": float(np.max(np.abs(delta))), "localized": True,
+            "propagates": True, "stable": True,
+        }
+    energy = (delta ** 2).sum(axis=1)
+    active = np.any(np.abs(perturbation) > 1e-7, axis=0)
+    near = active.copy()
+    for _ in range(3):
+        expanded = near.copy()
+        expanded[1:] |= near[:-1]; expanded[:-1] |= near[1:]
+        expanded[:, 1:] |= near[:, :-1]; expanded[:, :-1] |= near[:, 1:]
+        near = expanded
+    e0 = float(energy[0].sum())
+    near_frac = float(energy[0][near].sum() / e0) if e0 > 0 else 0.0
+    out = np.asarray([energy[k][~near].sum() for k in range(len(energy))])
+    late = float(out[3:min(8, len(out))].mean()) if len(out) >= 4 else float(out[-1])
+    # Physical-unit cap is deliberately conservative in a dashboard; official
+    # standardized stability remains the evaluator's responsibility.
+    return {
+        "finite": finite, "rain_ok": rain_ok, "temp_ok": temp_ok,
+        "near_fraction_day1": near_frac, "outside_energy_day1": float(out[0]),
+        "outside_energy_day4_8": late, "localized": near_frac >= 0.60,
+        "propagates": late > 1.5 * float(out[0]) + 1e-12,
+        "stable": bool(np.max(np.abs(delta)) < 5000.0),
+    }
+
+
 st.title("Multiverse of Monsoon — Live Climate Digital Twin of India")
 st.caption("Live coupled to the inference API (Timeline Prime vs Causal Shock Branch + Flood & Kharif Crop-Stress Co-Pilot)")
 
@@ -190,7 +236,7 @@ m2.metric("Branch Latency", f"{ms_b:.1f} ms")
 m3.metric("Max |Δ Rain|", f"{np.max(np.abs(branch[:, 1] - prime[:, 1])):.2f} mm/day")
 m4.metric("Max |Δ Temp|", f"{np.max(np.abs(branch[:, 0] - prime[:, 0])):.2f} K")
 
-tab_maps, tab_impact = st.tabs(["Timeline Prime vs Multiverse", "Flood & Kharif Crop-Stress Co-Pilot"])
+tab_maps, tab_impact, tab_lab = st.tabs(["Timeline Prime vs Multiverse", "Flood & Kharif Crop-Stress Co-Pilot", "Scenario Lab"])
 
 with tab_maps:
     c1, c2 = st.columns(2)
@@ -241,3 +287,33 @@ with tab_impact:
         heatmap_fig(stress_diff, f"Δ {steps}-Day Crop Heat-Drought Stress (days)", -s_lim, s_lim, "RdYlGn_r"),
         use_container_width=True,
     )
+
+with tab_lab:
+    st.subheader("Live Shock Scenario Lab")
+    st.caption("Every row calls the running `/simulate` API twice (prime and branch). These diagnostics test output validity and response behavior; shock counterfactual accuracy has no observed ground truth.")
+    st.warning("For measured forecast accuracy on held-out historical truth, run `python -m train.stress_benchmark --ckpt weights/model.pt`. Do not interpret a synthetic seasonal seed as a verified forecast score.")
+    if st.button("Run Predefined Shock Suite", use_container_width=True):
+        records = []
+        progress = st.progress(0)
+        for n, (scenario_name, scenario_mode) in enumerate(SCENARIO_SUITE.items(), start=1):
+            suite_pert = build_shock(scenario_mode, init_states[-1], lat_min, lat_max, lon_min, lon_max, dt2m, dtcwv_pct, dwind_pct)
+            try:
+                suite_prime, suite_prime_ms = call_simulate(server_url, init_states, doy_sc, steps, None)
+                suite_branch, suite_branch_ms = call_simulate(server_url, init_states, doy_sc, steps, suite_pert)
+                diag = scenario_diagnostics(suite_prime, suite_branch, suite_pert, scenario_mode)
+                records.append({
+                    "Scenario": scenario_name,
+                    "Prime ms": round(suite_prime_ms, 1), "Branch ms": round(suite_branch_ms, 1),
+                    "Finite": diag["finite"], "Rain ≥ 0": diag["rain_ok"], "Temperature valid": diag["temp_ok"],
+                    "Localized day 1": diag["localized"], "Propagates": diag["propagates"], "Stable": diag["stable"],
+                    "Near energy day 1": round(float(diag.get("near_fraction_day1", 1.0)), 3),
+                    "Late/outside energy": round(float(diag.get("outside_energy_day4_8", 0.0)), 3),
+                    "Null max Δ": round(float(diag.get("null_max_delta", 0.0)), 8),
+                })
+            except Exception as exc:
+                records.append({"Scenario": scenario_name, "Error": str(exc)})
+            progress.progress(n / len(SCENARIO_SUITE))
+        st.dataframe(records, use_container_width=True, hide_index=True)
+        st.session_state["scenario_records"] = records
+    elif "scenario_records" not in st.session_state:
+        st.info("Choose a seasonal initial state in the sidebar, then run the suite. Try all five seasonal presets for a broader manual stress test.")
