@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   Activity, ArrowLeft, ArrowRight, ArrowUpRight, CalendarDays, CheckCircle2, ChevronDown,
   CircleDot, Droplets, Gauge, Home, Info, Leaf, MapPinned,
-  RefreshCw, Settings2, Sparkles, Thermometer, Wind, Zap,
+  RefreshCw, Settings2, Sparkles, Thermometer, Wind, Zap, ClipboardPenLine,
 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Map as MapLibreMap, Marker, NavigationControl } from "maplibre-gl";
@@ -13,6 +13,7 @@ import { checkHealth, loadInitialState, simulate } from "./lib/api";
 import { cellCenter, colorForValue, countryContext, fieldMean, formatValue, gridFeatureCollection, isIndiaGridCell, LAT_MIN, LON_MIN, NLAT, NLON, selectionFeature, shockRegionFeature, unitFor, valuesForVariable } from "./lib/grid";
 import { cn } from "./lib/cn";
 import { absolutePercentile, rainfallMetricField, summarizeLandField } from "./lib/impact";
+import { buildMeanConditionedStates, scenarioDefaults, SCENARIO_FIELDS, SCENARIO_STEPS } from "./lib/scenario";
 
 const transition = { duration: 0.18, ease: "easeOut" } as const;
 const synchronizedMaps = new Map<string, Set<MapLibreMap>>();
@@ -73,8 +74,15 @@ function App() {
   const [dismissHoverSignal, setDismissHoverSignal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [health, setHealth] = useState<"online" | "offline" | "checking">("checking");
+  const [modelName, setModelName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [scenarioInputs, setScenarioInputs] = useState<string[][] | null>(null);
+  const [scenarioResult, setScenarioResult] = useState<SimulationResponse | null>(null);
+  const [scenarioInitialState, setScenarioInitialState] = useState<number[][][] | null>(null);
+  const [scenarioLoading, setScenarioLoading] = useState(false);
+  const [scenarioError, setScenarioError] = useState<string | null>(null);
   const requestId = useRef(0);
+  const scenarioRequestId = useRef(0);
   const shockRevision = useRef(0);
   const [refreshToken, setRefreshToken] = useState(0);
   const seedMeta = SEEDS.find((item) => item.key === seed) || SEEDS[0];
@@ -97,7 +105,7 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    const probe = () => void checkHealth().then(() => { if (active) setHealth("online"); }).catch(() => { if (active) setHealth("offline"); });
+    const probe = () => void checkHealth().then((result) => { if (active) { setHealth("online"); setModelName(result.model_name); } }).catch(() => { if (active) { setHealth("offline"); setModelName(""); } });
     probe();
     const timer = window.setInterval(probe, 12_000);
     return () => { active = false; window.clearInterval(timer); };
@@ -117,6 +125,26 @@ function App() {
     }, refreshToken ? 0 : 220);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [seedState, steps, refreshToken]);
+
+  useEffect(() => {
+    scenarioRequestId.current += 1;
+    setScenarioInputs(null);
+    setScenarioResult(null);
+    setScenarioInitialState(null);
+    setScenarioError(null);
+    setScenarioLoading(false);
+    if (!seedState) return;
+    try {
+      const defaults = scenarioDefaults(seedState.initStates, seedState.landSeaMask, isIndiaGridCell).map((day) => day.map((value) => value.toFixed(1)));
+      setScenarioInputs(defaults);
+      setScenarioResult(null);
+      setScenarioError(null);
+      setLeadDay(1);
+    } catch (exc) {
+      setScenarioInputs(null);
+      setScenarioError(exc instanceof Error ? exc.message : "Could not derive India-wide climatology means");
+    }
+  }, [seedState]);
 
   useEffect(() => { shockRevision.current += 1; setBranch(null); setBranchLabel(""); }, [shockPreset, customDeltas, customLat, customLon, customRadius, warmTemperatureK, warmMoisturePercent, windReductionPercent]);
 
@@ -146,20 +174,53 @@ function App() {
     finally { if (id === requestId.current) setLoading(false); }
   };
 
+  const runUserScenario = async () => {
+    if (!seedState || !scenarioInputs || health !== "online" || !modelName) return;
+    const id = ++scenarioRequestId.current;
+    setScenarioLoading(true);
+    setScenarioError(null);
+    try {
+      if (scenarioInputs.some((day) => day.length !== 6 || day.some((value) => value.trim() === "" || !Number.isFinite(Number(value))))) {
+        throw new Error("Complete all six numeric fields for each of the three input days.");
+      }
+      const inputGrid = buildMeanConditionedStates(seedState.initStates, scenarioInputs.map((day) => day.map(Number)), seedState.landSeaMask, isIndiaGridCell);
+      const response = await simulate({ init_states: inputGrid, doy_sincos: seedState.doySincos, steps: SCENARIO_STEPS, perturbation: null });
+      if (id === scenarioRequestId.current) {
+        setScenarioResult(response);
+        setScenarioInitialState(inputGrid[2]);
+        setLeadDay(1);
+        setHealth("online");
+      }
+    } catch (exc) {
+      if (id === scenarioRequestId.current) setScenarioError(exc instanceof Error ? exc.message : "The model scenario request failed");
+    } finally {
+      if (id === scenarioRequestId.current) setScenarioLoading(false);
+    }
+  };
+
+  const updateScenarioInputs = (next: string[][]) => {
+    scenarioRequestId.current += 1;
+    setScenarioLoading(false);
+    setScenarioInputs(next);
+    setScenarioResult(null);
+    setScenarioInitialState(null);
+    setScenarioError(null);
+  };
+
   const selectedState = prime?.rollout[Math.min(leadDay - 1, (prime?.rollout.length || 1) - 1)] || lastState;
   const selectedField = selectedState ? valuesForVariable(selectedState, variable) : Array.from({ length: NLAT }, () => Array(NLON).fill(0));
   const commitHorizon = (value: number) => { const horizon = Math.max(10, Math.min(14, value)); setStepsDraft(horizon); setSteps(horizon); setLeadDay((day) => Math.min(day, horizon)); };
 
   return (
     <div className="app-shell">
-      <Sidebar page={page} setPage={setPage} />
+      <Sidebar page={page} setPage={(nextPage) => { setPage(nextPage); if (nextPage === "scenario") setLeadDay(1); }} />
       <main className="main-shell">
-        <Topbar health={health} leadDay={leadDay} steps={steps} setLeadDay={setLeadDay} />
+        <Topbar health={health} leadDay={leadDay} steps={page === "scenario" ? SCENARIO_STEPS : steps} setLeadDay={(day) => setLeadDay(Math.min(page === "scenario" ? SCENARIO_STEPS : steps, day))} />
         <div className="content-shell">
           <PageHeader page={page} seedLabel={seedState?.label || "Loading ERA5 climatology"} />
           {page !== "impact" && <VariableStrip variable={variable} setVariable={setVariable} tooltipEnabled={tooltipEnabled} setTooltipEnabled={setTooltipEnabled} />}
-          <ControlRow seed={seed} setSeed={setSeed} steps={stepsDraft} setStepsDraft={setStepsDraft} commitSteps={commitHorizon} onRefresh={() => setRefreshToken((value) => value + 1)} loading={loading} />
-          {error && <div className="error-banner" role="alert"><Info size={18} /><span>{error}. Check that <code>python serve.py --port 8000</code> is running, then retry.</span><button aria-label="Retry forecast" onClick={() => setRefreshToken((value) => value + 1)}><RefreshCw size={17} /></button></div>}
+          {page !== "scenario" && <ControlRow seed={seed} setSeed={setSeed} steps={stepsDraft} setStepsDraft={setStepsDraft} commitSteps={commitHorizon} onRefresh={() => setRefreshToken((value) => value + 1)} loading={loading} />}
+          {page !== "scenario" && error && <div className="error-banner" role="alert"><Info size={18} /><span>{error}. Check that <code>python serve.py --port 8000</code> is running, then retry.</span><button aria-label="Retry forecast" onClick={() => setRefreshToken((value) => value + 1)}><RefreshCw size={17} /></button></div>}
           <AnimatePresence mode="wait">
             <motion.div key={page} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={transition}>
               {page === "dashboard" ? (
@@ -178,8 +239,10 @@ function App() {
                   warmMoisturePercent={warmMoisturePercent} setWarmMoisturePercent={setWarmMoisturePercent} windReductionPercent={windReductionPercent}
                   setWindReductionPercent={setWindReductionPercent} onApply={applyShock}
                 />
-              ) : (
+              ) : page === "impact" ? (
                 <ImpactView prime={prime?.rollout || null} branch={branch?.rollout || null} branchLabel={branchLabel} climatology={seedState?.climatologyReference || null} landSeaMask={seedState?.landSeaMask} loading={loading} selection={selection} setSelection={setSelection} leadDay={leadDay} setLeadDay={setLeadDay} tooltipEnabled={tooltipEnabled} setTooltipEnabled={setTooltipEnabled} dismissHoverSignal={dismissHoverSignal} />
+              ) : (
+                <MyScenarioView seed={seed} setSeed={setSeed} inputs={scenarioInputs} setInputs={updateScenarioInputs} seedState={seedState} result={scenarioResult} initialState={scenarioInitialState} loading={scenarioLoading} error={scenarioError} health={health} modelName={modelName} onRun={runUserScenario} variable={variable} selection={selection} setSelection={setSelection} leadDay={leadDay} setLeadDay={setLeadDay} trendScope={trendScope} setTrendScope={setTrendScope} tooltipEnabled={tooltipEnabled} dismissHoverSignal={dismissHoverSignal} />
               )}
             </motion.div>
           </AnimatePresence>
@@ -197,6 +260,7 @@ function Sidebar({ page, setPage }: { page: Page; setPage: (page: Page) => void 
       <button className={cn("nav-item", page === "dashboard" && "active")} aria-current={page === "dashboard" ? "page" : undefined} onClick={() => setPage("dashboard")}><Home size={20} /><span>Dashboard</span></button>
       <button className={cn("nav-item", page === "shock" && "active")} aria-current={page === "shock" ? "page" : undefined} onClick={() => setPage("shock")}><Zap size={20} /><span>Shock Lab</span></button>
       <button className={cn("nav-item", page === "impact" && "active")} aria-current={page === "impact" ? "page" : undefined} onClick={() => setPage("impact")}><Activity size={20} /><span>Monsoon Impact</span></button>
+      <button className={cn("nav-item", page === "scenario" && "active")} aria-current={page === "scenario" ? "page" : undefined} onClick={() => setPage("scenario")}><ClipboardPenLine size={20} /><span>My Scenario</span></button>
     </nav>
     <div className="sidebar-footer"><p>Powered by<br /><strong>Our Simulation</strong><br /><span>(No External API)</span></p><div className="offline-badge"><CheckCircle2 size={14} /> Offline-ready</div><small>Explore. Simulate.<br />Understand. Prepare.</small></div>
   </aside>;
@@ -207,8 +271,8 @@ function Topbar({ health, leadDay, steps, setLeadDay }: { health: string; leadDa
 }
 
 function PageHeader({ page, seedLabel }: { page: Page; seedLabel: string }) {
-  const title = page === "dashboard" ? "India Weather Dashboard" : page === "shock" ? "Multiverse scenarios" : "Monsoon continuity & extremes";
-  const description = page === "dashboard" ? "Explore a live model rollout across India and surrounding seas." : page === "shock" ? "Apply localized, physical-unit changes and compare live outcomes." : "Screen rainfall continuity and extremes directly from the live model rollout.";
+  const title = page === "dashboard" ? "India Weather Dashboard" : page === "shock" ? "Multiverse scenarios" : page === "scenario" ? "My Scenario" : "Monsoon continuity & extremes";
+  const description = page === "dashboard" ? "Explore a live model rollout across India and surrounding seas." : page === "shock" ? "Apply localized, physical-unit changes and compare live outcomes." : page === "scenario" ? "Shape a three-day India-wide starting scenario and forecast the next six model days." : "Screen rainfall continuity and extremes directly from the live model rollout.";
   return <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot" />Scenario simulation <span>•</span> {seedLabel} · not an observation</div><h1>{title}</h1><p>{description}</p></div></div>;
 }
 
@@ -219,6 +283,51 @@ function VariableStrip({ variable, setVariable, tooltipEnabled, setTooltipEnable
 function ControlRow({ seed, setSeed, steps, setStepsDraft, commitSteps, onRefresh, loading }: { seed: SeedPreset; setSeed: (seed: SeedPreset) => void; steps: number; setStepsDraft: (steps: number) => void; commitSteps: (steps: number) => void; onRefresh: () => void; loading: boolean }) {
   const commit = (event: React.SyntheticEvent<HTMLInputElement>) => commitSteps(Number(event.currentTarget.value));
   return <section className="simulation-setup" aria-label="Simulation setup"><div className="setup-heading"><div><span className="card-kicker"><Settings2 size={15} />Simulation setup</span><p>Forecast length is the number of model steps. Changing it reruns Timeline Prime and clears any existing shock branch.</p></div><span className="setup-status">{loading ? "Updating rollout…" : "Ready to simulate"}</span></div><div className="control-row"><label className="compact-select"><span>Initial atmosphere</span><select value={seed} onChange={(event) => setSeed(event.target.value as SeedPreset)}>{SEEDS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select><ChevronDown size={15} /></label><label className="horizon-control"><span>Forecast length</span><input type="range" min="10" max="14" value={steps} aria-label="Forecast length in model steps, from ten to fourteen" onChange={(event) => setStepsDraft(Number(event.target.value))} onPointerUp={commit} onKeyUp={commit} onBlur={commit} /><strong>{steps} days</strong></label><button className="ghost-button" onClick={onRefresh} disabled={loading}><RefreshCw size={16} className={loading ? "spin" : ""} />{loading ? "Simulating" : "Run baseline again"}</button></div></section>;
+}
+
+function MyScenarioView({ seed, setSeed, inputs, setInputs, seedState, result, initialState, loading, error, health, modelName, onRun, variable, selection, setSelection, leadDay, setLeadDay, trendScope, setTrendScope, tooltipEnabled, dismissHoverSignal }: { seed: SeedPreset; setSeed: (seed: SeedPreset) => void; inputs: string[][] | null; setInputs: (inputs: string[][]) => void; seedState: SeedState | null; result: SimulationResponse | null; initialState: number[][][] | null; loading: boolean; error: string | null; health: string; modelName: string; onRun: () => void; variable: Variable; selection: CellSelection | null; setSelection: (selection: CellSelection | null) => void; leadDay: number; setLeadDay: (day: number) => void; trendScope: TrendScope; setTrendScope: (scope: TrendScope) => void; tooltipEnabled: boolean; dismissHoverSignal: number }) {
+  const usableInputs = Boolean(inputs && inputs.length === 3 && inputs.every((day) => day.length === 6));
+  const forecastDay = result?.rollout[Math.min(leadDay - 1, SCENARIO_STEPS - 1)] || null;
+  const field = forecastDay ? valuesForVariable(forecastDay, variable) : Array.from({ length: NLAT }, () => Array(NLON).fill(0));
+  const resetInputs = () => {
+    if (!seedState) return;
+    setInputs(scenarioDefaults(seedState.initStates, seedState.landSeaMask, isIndiaGridCell).map((day) => day.map((value) => value.toFixed(1))));
+  };
+  const inputDays = ["Input day 1 · oldest", "Input day 2", "Input day 3 · latest"];
+
+  return <div className="my-scenario-page">
+    <section className="simulation-setup scenario-setup" aria-label="User scenario setup">
+      <div className="setup-heading"><div><span className="card-kicker"><Settings2 size={15} />Scenario setup</span><p>Enter India-wide land-weighted daily means. The seasonal spatial pattern is preserved to create full model-ready weather grids.</p></div><span className={cn("setup-status", health === "online" ? "scenario-online" : "")}>{health === "online" ? "Trained model ready" : health === "checking" ? "Checking model…" : "Model server offline"}</span></div>
+      <div className="scenario-context-row">
+        <label className="compact-select"><span>Seasonal context</span><select value={seed} onChange={(event) => setSeed(event.target.value as SeedPreset)}>{SEEDS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select><ChevronDown size={15} /></label>
+        <div className="scenario-model-pill"><span className={cn("status-dot", health !== "online" && health)} />{modelName || "Waiting for /health"}</div>
+        <button className="text-action" type="button" onClick={resetInputs} disabled={!seedState}>Reset to seasonal context</button>
+      </div>
+      <form onSubmit={(event) => { event.preventDefault(); onRun(); }}>
+        <div className="scenario-day-grid">
+          {inputDays.map((dayLabel, dayIndex) => <fieldset className="scenario-day-card" key={dayLabel} disabled={!seedState || !inputs}>
+            <legend>{dayLabel}</legend>
+            {SCENARIO_FIELDS.map((fieldMeta, channel) => <label className="scenario-input" key={fieldMeta.key}>
+              <span>{fieldMeta.label}<small>{fieldMeta.unit}</small></span>
+              <input type="number" inputMode="decimal" required min={fieldMeta.min} max={fieldMeta.max} step={fieldMeta.step} value={inputs?.[dayIndex]?.[channel] ?? ""} onChange={(event) => { if (!inputs) return; const next = inputs.map((day) => day.slice()); next[dayIndex][channel] = event.target.value; setInputs(next); }} aria-label={`${dayLabel}, ${fieldMeta.label} in ${fieldMeta.unit}`} />
+            </label>)}
+          </fieldset>)}
+        </div>
+        <div className="scenario-submit-row"><span className="scenario-hint"><Info size={15} />Means are conditioned onto the bundled ERA5 seasonal grid—not observed daily weather.</span><button className="apply-button scenario-run" type="submit" disabled={!usableInputs || !seedState || health !== "online" || loading}><Zap size={18} />{loading ? "Running trained model…" : result ? "Run scenario again" : "Simulate next 6 days"}</button></div>
+      </form>
+      {error && <div className="error-banner scenario-error" role="alert"><Info size={17} />{error}</div>}
+    </section>
+
+    {result ? <>
+      <div className="scenario-results-heading"><div><span className="card-kicker green"><Activity size={15} />Live model output</span><h2>Six-day forecast from your three-day scenario</h2></div><span className="day-chip">{result.inference_ms.toFixed(0)} ms · {SCENARIO_STEPS} steps</span></div>
+      <div className="scenario-results-grid">
+        <section className="map-card large scenario-map-card"><div className="card-header compact"><div><span className="card-kicker green"><CircleDot size={15} />My Scenario · {modelName || "loaded inference model"}</span><h2>{CHANNELS.find((item) => item.key === variable)?.label} · forecast day {leadDay}</h2></div><span className="day-chip">Day {leadDay} / {SCENARIO_STEPS}</span></div><MapView field={field} variable={variable} selection={selection} setSelection={setSelection} loading={loading} hasData={Boolean(result)} captionDetail={`Live model · ${unitFor(variable)}`} tooltipEnabled={tooltipEnabled} dismissHoverSignal={dismissHoverSignal} /><MapFooter variable={variable} field={field} landSeaMask={seedState?.landSeaMask} hasData={Boolean(result)} /></section>
+        <RegionPanel state={forecastDay} selection={selection} variable={variable} scenario="My Scenario" day={leadDay} />
+      </div>
+      <TrendCard rollout={result.rollout} branch={null} variable={variable} landSeaMask={seedState?.landSeaMask} selection={selection} initialState={initialState} climatology={seedState?.climatologyReference || null} scope={trendScope} setScope={setTrendScope} leadDay={leadDay} setLeadDay={setLeadDay} />
+      <div className="scenario-provenance"><Info size={16} /><span>Generated by the model reported at <code>/health</code> using the live <code>/simulate</code> response. The input is a synthetic scenario built from seasonal climatology and your entered India means; this is not a verified forecast.</span></div>
+    </> : <section className="scenario-empty"><div className="scenario-empty-icon"><Activity size={22} /></div><strong>Your six-day rollout will appear here</strong><span>Complete the three-day setup, then run the trained model to create forecast maps and trends.</span></section>}
+  </div>;
 }
 
 function DashboardView({ field, variable, selection, setSelection, landSeaMask, prime, branch, leadDay, setLeadDay, loading, onOpenShock, seedState, trendScope, setTrendScope, tooltipEnabled, dismissHoverSignal }: { field: Field; variable: Variable; selection: CellSelection | null; setSelection: (selection: CellSelection | null) => void; landSeaMask?: Field; prime: SimulationResponse | null; branch: SimulationResponse | null; leadDay: number; setLeadDay: (day: number) => void; loading: boolean; onOpenShock: () => void; seedState: SeedState | null; trendScope: TrendScope; setTrendScope: (scope: TrendScope) => void; tooltipEnabled: boolean; dismissHoverSignal: number }) {

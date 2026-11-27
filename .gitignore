@@ -13,6 +13,20 @@ dashboard/src/data/*
 # Ignore team kit clone (kit should not be committed inside submission repo)
 yug-monsoon-kit/
 
+# Optional planning/research artifacts: retain locally, exclude from submission
+/agents.md
+/IMPLEMENTATION_PLAN.md
+/CANDIDATE_HYBRID_ADVECTION.md
+/brief_source.md
+/colab_train.ipynb
+/tools/render_brief.py
+
+# Superseded checkpoints; serve.py uses only model.pt (plus runtime assets below)
+/weights/LEGACY_36_CHANNEL_MODEL.pt
+/weights/SUBMISSION_MODEL_GATED_TRANSPORT.pt
+/weights/SUBMISSION_MODEL_UNET_SEED42.pt
+/weights/model_unet.pt
+
 # Python cache & virtual environments
 node_modules/
 __pycache__/

@@ -1,4 +1,4 @@
-export type Page = "dashboard" | "shock" | "impact";
+export type Page = "dashboard" | "shock" | "impact" | "scenario";
 export type Variable = "t2m" | "tp" | "u10" | "v10" | "msl" | "tcwv";
 export type TrendScope = "regional" | "cell";
 export type ImpactMetric = "total" | "low-rain-run" | "benchmark-days" | "rolling-3day" | "climatology-departure";
