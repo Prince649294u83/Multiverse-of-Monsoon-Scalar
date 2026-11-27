@@ -1,0 +1,14 @@
+# Core inference/runtime dependencies (all available in the evaluation sandbox)
+numpy
+torch
+fastapi
+uvicorn
+
+# Training and local data preparation
+scipy
+pandas
+xarray
+scikit-learn
+
+# Optional dashboard-side Python utilities (the UI itself is under dashboard/)
+requests

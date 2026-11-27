@@ -14,6 +14,14 @@ import numpy as np
 import torch
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+
+try:
+    import orjson  # Optional accelerator; the sandbox-safe standard encoder remains the fallback.
+    from fastapi.responses import ORJSONResponse as _DefaultResponse
+except ImportError:
+    from fastapi.responses import JSONResponse as _DefaultResponse
 
 from model.architecture import ClimateDigitalTwin, IN_CHANNELS
 from model.hybrid_advection import HybridAdvectionTwin
@@ -22,13 +30,35 @@ from model.gated_transport import GatedTransportTwin
 ROOT = Path(__file__).resolve().parent
 WEIGHTS_PATH = ROOT / "weights" / "model.pt"
 ENS2_PATH = ROOT / "weights" / "model_ens2.pt"
+CLIMATOLOGY_PATH = ROOT / "weights" / "climatology.npy"
+STATIC_PATH = ROOT / "weights" / "static.npy"
 MODEL_NAME = "gated-transport-climate-twin-candidate-c"
 
 # Tune CPU thread count for compact [1, C, 32, 36] conv tensors
 torch.set_num_threads(2)
 
-app = FastAPI(title="Multiverse of Monsoon Digital Twin")
+app = FastAPI(title="Multiverse of Monsoon Digital Twin", default_response_class=_DefaultResponse)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ],
+    allow_credentials=False,
+    allow_methods=["POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 _MODELS: list[ClimateDigitalTwin] = []
+_CLIMATOLOGY = np.load(CLIMATOLOGY_PATH, mmap_mode="r") if CLIMATOLOGY_PATH.is_file() else None
+_STATIC = np.load(STATIC_PATH, mmap_mode="r") if STATIC_PATH.is_file() else None
+
+if _CLIMATOLOGY is not None and _CLIMATOLOGY.shape != (365, 6, 32, 36):
+    raise RuntimeError(f"Expected 365-day physical climatology [365, 6, 32, 36], got {_CLIMATOLOGY.shape}")
+if _STATIC is not None and _STATIC.shape != (2, 32, 36):
+    raise RuntimeError(f"Expected static fields [2, 32, 36], got {_STATIC.shape}")
 
 
 def _load_one(path: Path) -> ClimateDigitalTwin:
@@ -146,6 +176,31 @@ def health():
     if not _MODELS:
         raise HTTPException(status_code=503, detail="model not ready")
     return {"status": "ready", "model_name": MODEL_NAME}
+
+
+@app.post("/initial-state")
+def initial_state(request: dict):
+    """Return a short, physical-unit ERA5 seasonal-climatology context for the UI."""
+    if _CLIMATOLOGY is None or _STATIC is None:
+        raise HTTPException(status_code=503, detail="seasonal climatology is not available")
+    try:
+        doy = int(request["doy"])
+        if not 1 <= doy <= 365:
+            raise ValueError("doy must be between 1 and 365")
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    indices = [(doy - 3) % 365, (doy - 2) % 365, (doy - 1) % 365]
+    # A seasonal reference is a permitted, compact climatology product—not a
+    # historical weather-case lookup. Lead 1 starts on the day after the input.
+    reference_indices = [(doy + lead - 1) % 365 for lead in range(1, 15)]
+    angle = (2.0 * np.pi * (doy - 1)) / 365.0
+    return {
+        "init_states": np.asarray(_CLIMATOLOGY[indices], dtype=np.float32).tolist(),
+        "climatology_reference": np.asarray(_CLIMATOLOGY[reference_indices], dtype=np.float32).tolist(),
+        "doy_sincos": [float(np.sin(angle)), float(np.cos(angle))],
+        "land_sea_mask": np.asarray(_STATIC[0], dtype=np.float32).tolist(),
+        "source": "Bundled ERA5 training climatology",
+    }
 
 
 @app.post("/simulate")

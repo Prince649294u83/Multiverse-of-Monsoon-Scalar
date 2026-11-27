@@ -142,7 +142,8 @@ Multiverse-of-Monsoon/
 │   └── default.json            # Reproducible train/evaluation configuration
 ├── tests/                      # API, phase, clamp, and causality regression tests
 ├── dashboard/
-│   └── app.py                  # Streamlit + Plotly live Multiverse UI + Flood & Crop-Stress Co-Pilot
+│   ├── package.json            # React/Vite/TypeScript offline dashboard dependencies
+│   └── src/                    # Live Dashboard + Custom Shock UI and local MapLibre renderer
 ├── README.md                   # Exact training, evaluation, server & dashboard instructions
 ├── brief.pdf                   # 2-page architectural & impact brief
 └── IMPLEMENTATION_PLAN.md      # This audited blueprint
@@ -179,10 +180,11 @@ Multiverse-of-Monsoon/
 - [ ] Re-run `python -m monsoon_r1.schema_validator http://localhost:8000` → ALL PASS.
 - [ ] Verify clean repo scan (`monsoon_r1.repo_scan.scan` on clean directory without `.nc` / `yug-monsoon-kit/`) → **15.0 / 15.0 points**, 0 critical, 0 warnings.
 
-### Phase 4: Live Interactive Dashboard & Impact Co-Pilot (`dashboard/app.py`)
-- [ ] Standalone Streamlit + Plotly app calling live `POST http://localhost:8000/simulate` (zero pre-rendered results).
-- [ ] **Timeline Prime vs Multiverse Explorer:** Side-by-side India geo-maps (`t2m`, `tp`, wind vectors/speed, `msl`, `tcwv`) + Day 1..10 `Shock − Prime` delta heatmaps.
-- [ ] **Custom Live Shock Builder (Stage 2 Demo Ready):** Presets (`warm_ocean`, `monsoon_stall`, `null`) + custom lat/lon box sliders for arbitrary real-time judge shocks.
+### Phase 4: Live Interactive Dashboard & Custom Shock UI (`dashboard/`)
+- [x] Standalone React + Vite + TypeScript app calling live `POST http://localhost:8000/simulate` (zero pre-rendered results).
+- [x] Bundled local vector/grid map renderer with no hosted map tiles or runtime downloads.
+- [x] **Timeline Prime vs Multiverse Explorer:** Side-by-side India geo-maps (`t2m`, `tp`, wind speed, `msl`, `tcwv`) + lead-day comparison controls.
+- [x] **Custom Live Shock Builder (Stage 2 Demo Ready):** Presets (`warm_ocean`, `monsoon_stall`, `null`) + custom latitude/longitude/radius controls for real-time judge shocks.
 - [ ] **Impact Module — Monsoon Flood & Kharif Crop-Stress Co-Pilot:** Cumulative 10-day rainfall & heavy-rain risk zones (`> 10` / `> 64.5 mm/day`) + heat/moisture-deficit crop stress index across agricultural regions.
   - Describe these as transparent scenario-exploration tiers, not official IMD warnings or guaranteed impact predictions at 1° resolution.
 
@@ -320,7 +322,7 @@ Running the initial `ShallowLocalResUNet` (`319,212` params) and `LocalResNet` (
    - If `v2 mean_SS >= 0.13`, `CSI >= 0.12`, `Anti-Blur == 10.0`, `Causality == 15.0` → freeze architecture, optionally test a 2-seed ensemble for extra margin, and lock `weights/model.pt`.
    - If `mean_SS` is `0.10–0.125` → add the 5 physical flux/gradient channels (`|V|, u*tcwv, v*tcwv, ∂msl/∂x, ∂msl/∂y`) + 2-seed ensemble.
    - If `[coupled]` fails Day-1 localization while `[operator]` scores `15/15` → either add synthetic perturbation-locality regularization in Stage 3 OR use `[operator]` + cross-channel thermodynamic coupling for Stage 2.
-3. Run full local verification matrix (`serve.py` + `monsoon_r1.schema_validator` + clean-staging `repo_scan` `15/15`), then finalize `dashboard/app.py` demo polish and 2-page `brief.pdf`.
+3. Run full local verification matrix (`serve.py` + `monsoon_r1.schema_validator` + clean-staging `repo_scan` `15/15`), then finalize `dashboard/` demo polish and the remaining impact module.
 
 ### 8.4 Architecture & Physics Paradigm Comparison (For Track 2 & `brief.pdf` Justification)
 

@@ -42,21 +42,63 @@ python serve.py --port 8000
 python -m monsoon_r1.schema_validator http://localhost:8000
 ```
 
-### 5. Run Live Interactive Dashboard + Impact Co-Pilot
-In a second terminal (while `serve.py` is running):
+### 5. Run Live Interactive Dashboard
+The dashboard is a bundled React/Vite/TypeScript application. Install its local npm dependencies once:
 ```bash
-streamlit run dashboard/app.py
+cd dashboard
+npm install
 ```
 
-The **Scenario Lab** tab invokes the live server for warm Bay of Bengal,
-Arabian Sea wind-stall, and null-shock cases. It reports response locality,
-outward propagation, output-validity, and null-shock consistency. These are
-live physical-response checks; use the held-out historical benchmark for
-measured forecast skill:
+In a second terminal (while `serve.py` is running), start the offline development UI:
+```bash
+npm run dev
+```
+
+Open `http://localhost:5173`. The Dashboard and Custom Shock views call the
+live `/simulate` endpoint; they do not read pre-rendered forecast results.
+
+For a production-style local bundle:
+```bash
+cd dashboard
+npm run build
+npm run preview
+```
+
+The UI is offline-ready: India geometry, weather grid rendering, controls, and
+all JavaScript dependencies are bundled locally. Only the local inference
+server is contacted during a simulation. The initial atmosphere is explicitly
+a seasonal-climatology scenario, not a current observation or a verified
+hindcast. Trend charts compare the live model rollout with persistence and the
+bundled seasonal climatology; neither reference is represented as observed
+future truth. No held-out weather windows are shipped to the dashboard.
+
+The basemap uses a bundled Natural Earth 1:110m country GeoJSON asset for
+neighbor borders and coastline context. Country-name labels are intentionally
+omitted so the data grid and national boundaries stay legible; sea labels are
+kept. The map is local at runtime and does not depend on hosted tiles or a
+public map API.
+
+The Custom Shock view includes warm Bay of Bengal, Arabian Sea wind-stall,
+null-shock, and custom spatial scenarios. Custom mode provides one additive,
+physical-unit slider per dynamic channel. Slider changes are staged; the model
+is called only when **Apply shock** is selected. Use the local validation
+benchmark for measured forecast skill (the results are not served to the UI):
 
 ```bash
 python -m train.stress_benchmark --ckpt weights/model.pt
 ```
+
+### Current validation status
+
+The selected checkpoint passes the local five-window scorecard (70/70 model
+points), but that small smoke set is not evidence of broad forecast accuracy.
+On the 62-window 2020–2021 stress proxy, it produced mean RMSE skill `0.0955`
+(target `0.12`), heavy-rain CSI skill `0.0919` (target `0.10`), anti-blur
+`10/10`, valid outputs on `62/62` windows, and full shock checks in `2/5`
+regimes. It therefore remains below the broad forecast and shock goals; do not
+interpret dashboard curves as verified future weather or claim the hidden
+2023–2024 benchmark has been passed. The stress proxy is local evaluation data
+only and is not packaged into the dashboard.
 
 ### 6. Clean Repo Scan Check (Before Final Submission)
 Move raw training `.nc` files (`data/india_climate_train.nc`) and `yug-monsoon-kit/` outside the scanned directory (or scan a clean `git archive` export) so `repo_scan` sees only submission files:

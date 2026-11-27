@@ -5,11 +5,13 @@ data/
 *.grib*
 *.zarr*
 *.whl
+*.zip
 
 # Ignore team kit clone (kit should not be committed inside submission repo)
 yug-monsoon-kit/
 
 # Python cache & virtual environments
+node_modules/
 __pycache__/
 *.pyc
 *.pyo
