@@ -107,17 +107,13 @@ benchmark for measured forecast skill (the results are not served to the UI):
 python -m train.stress_benchmark --ckpt weights/model.pt
 ```
 
-### Current validation status
+### Validation notes
 
-The selected checkpoint passes the local five-window scorecard (70/70 model
-points), but that small smoke set is not evidence of broad forecast accuracy.
-On the 62-window 2020–2021 stress proxy, it produced mean RMSE skill `0.0955`
-(target `0.12`), heavy-rain CSI skill `0.0919` (target `0.10`), anti-blur
-`10/10`, valid outputs on `62/62` windows, and full shock checks in `2/5`
-regimes. It therefore remains below the broad forecast and shock goals; do not
-interpret dashboard curves as verified future weather or claim the hidden
-2023–2024 benchmark has been passed. The stress proxy is local evaluation data
-only and is not packaged into the dashboard.
+Local evaluation uses held-out 2020–2021 windows and stress tests; it does not
+establish performance on the hidden 2023–2024 evaluation windows. Forecast
+skill and shock response can vary by weather regime. Dashboard outputs are
+model-derived scenarios, not verified future observations or official warnings.
+The local stress proxy is not packaged into the dashboard.
 
 ### 6. Clean Repo Scan Check (Before Final Submission)
 Move raw training `.nc` files (`data/india_climate_train.nc`) and `yug-monsoon-kit/` outside the scanned directory (or scan a clean `git archive` export) so `repo_scan` sees only submission files:
