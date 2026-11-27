@@ -135,8 +135,8 @@ def _validate_request(init: np.ndarray, doy_sincos, steps: int, perturbation: np
     doy = np.asarray(doy_sincos, dtype=np.float32)
     if doy.shape != (2,) or not np.isfinite(doy).all():
         raise ValueError("doy_sincos must be two finite values")
-    if not 1 <= steps <= 14:
-        raise ValueError("steps must be between 1 and 14")
+    if not 1 <= steps <= 30:
+        raise ValueError("steps must be between 1 and 30")
     if perturbation is not None:
         if perturbation.shape != (6, 32, 36):
             raise ValueError(f"perturbation shape must be (6, 32, 36), got {perturbation.shape}")

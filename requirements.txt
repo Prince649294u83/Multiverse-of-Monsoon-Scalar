@@ -12,3 +12,6 @@ scikit-learn
 
 # Optional dashboard-side Python utilities (the UI itself is under dashboard/)
 requests
+
+# Optional two-page design brief renderer (tools/render_brief.py)
+reportlab

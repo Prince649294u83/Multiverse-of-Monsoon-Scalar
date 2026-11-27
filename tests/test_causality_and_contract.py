@@ -80,9 +80,12 @@ class TestCausalityAndModelContract(unittest.TestCase):
             out1 = twin(init_s, doy, steps=1, perturbation=None)
             out14 = twin(init_s, doy, steps=14, perturbation=None)
             out14_null = twin(init_s, doy, steps=14, perturbation=torch.zeros((1, 6, 32, 36)))
+            out30 = twin(init_s, doy, steps=30, perturbation=None)
 
         self.assertEqual(tuple(out1.shape), (1, 1, 6, 32, 36))
         self.assertEqual(tuple(out14.shape), (1, 14, 6, 32, 36))
+        self.assertEqual(tuple(out30.shape), (1, 30, 6, 32, 36))
+        self.assertTrue(torch.isfinite(out30).all())
         self.assertTrue(torch.allclose(out14, out14_null, atol=1e-6))
 
     def test_perturbation_is_coupled_to_initial_condition(self) -> None:

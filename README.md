@@ -23,18 +23,27 @@ Ensure `data/india_climate_train.nc` and `data/stats.json` from `yug-monsoon-kit
 python -m train.prepare_data
 ```
 
-### 2. Train & Ablate Models (Phase 1–2)
+### 2. Train the baseline and deployed gated-transport model
+
+The released `weights/model.pt` is a **gated-transport** checkpoint initialized
+from a trained baseline. To reproduce the training sequence without replacing
+the deployed checkpoint during the baseline run, save the baseline separately,
+then use it to initialize gated transport:
+
 ```bash
-python -m train.train --arch unet --save-as-default
-python -m train.train --arch resnet
+python -m train.train --arch unet --out-name model_unet.pt
+python -m train.train --arch gated_transport --init-checkpoint weights/model_unet.pt --out-name model.pt --save-as-default
 ```
 
-### 3. Local Round-1 Benchmark (5 Extreme 2020–2021 Windows + 3 Shocks)
+The trainer uses its documented multi-stage defaults unless epoch flags are
+provided. Existing released checkpoints are the evaluated artifacts; a fresh
+training run is not expected to reproduce their exact weights bit-for-bit.
+
+### 3. Local Round-1 Benchmark (2020–2021 validation windows + shocks)
 ```bash
-python -m train.eval_local --ckpt weights/model_unet.pt
-python -m train.eval_local --ckpt weights/model_resnet.pt
+python -m train.eval_local --ckpt weights/model.pt
+python -m train.stress_benchmark --ckpt weights/model.pt
 ```
-Copy the higher-scoring checkpoint to `weights/model.pt`.
 
 ### 4. Run Offline Inference Server & Schema Validator
 ```bash
@@ -42,11 +51,21 @@ python serve.py --port 8000
 python -m monsoon_r1.schema_validator http://localhost:8000
 ```
 
+`POST /simulate` accepts three input days `[3, 6, 32, 36]`, a two-value
+day-of-year encoding, an integer `steps` value from **1 through 30**, and an
+optional physical-unit perturbation `[6, 32, 36]`. Outputs are nested JSON in
+physical units. The dashboard intentionally presents a judge-friendly
+10–14-day horizon; the server's 30-step ceiling supports extended contract and
+stability checks.
+
 ### 5. Run Live Interactive Dashboard
-The dashboard is a bundled React/Vite/TypeScript application. Install its local npm dependencies once:
+The dashboard is a bundled React/Vite/TypeScript application. Install its
+dependencies from the lockfile (`npm ci`) before an offline demo; dependencies
+must already be available locally because the evaluation environment has no
+internet:
 ```bash
 cd dashboard
-npm install
+npm ci
 ```
 
 In a second terminal (while `serve.py` is running), start the offline development UI:

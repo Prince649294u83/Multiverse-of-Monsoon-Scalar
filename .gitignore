@@ -1,5 +1,8 @@
 # Ignore raw heavy datasets from git submission to avoid repo_scan warning (-2 pts)
 data/
+!dashboard/src/data/
+dashboard/src/data/*
+!dashboard/src/data/natural-earth-countries.geojson
 *.nc
 *.nc4
 *.grib*
